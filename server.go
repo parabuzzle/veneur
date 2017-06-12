@@ -197,6 +197,10 @@ func NewFromConfig(conf Config) (ret Server, err error) {
 		})
 	}
 
+	// After log hooks are configured, if any further errors are found during
+	// setup we should use log.Fatal or log.Panic, because that will give us
+	// breakage monitoring through Sentry.
+
 	log.WithField("number", conf.NumWorkers).Info("Preparing workers")
 	// Allocate the slice, we'll fill it with workers later.
 	ret.Workers = make([]*Worker, conf.NumWorkers)
@@ -218,7 +222,7 @@ func NewFromConfig(conf Config) (ret Server, err error) {
 
 	ret.UDPAddr, err = net.ResolveUDPAddr("udp", conf.UdpAddress)
 	if err != nil {
-		return
+		log.WithError(err).Panic("Error resolving UDP address")
 	}
 
 	ret.metricMaxLength = conf.MetricMaxLength
@@ -230,19 +234,19 @@ func NewFromConfig(conf Config) (ret Server, err error) {
 	if conf.TcpAddress != "" {
 		ret.TCPAddr, err = net.ResolveTCPAddr("tcp", conf.TcpAddress)
 		if err != nil {
-			return
+			log.WithError(err).Panic("Error resolving TCP address")
 		}
 		if conf.TLSKey != "" {
 			if conf.TLSCertificate == "" {
 				err = errors.New("tls_key is set; must set tls_certificate")
-				return
+				log.WithError(err).Panic("Improper TLS configuration")
 			}
 
 			// load the TLS key and certificate
 			var cert tls.Certificate
 			cert, err = tls.X509KeyPair([]byte(conf.TLSCertificate), []byte(conf.TLSKey))
 			if err != nil {
-				return
+				log.WithError(err).Panic("Improper TLS configuration")
 			}
 
 			clientAuthMode := tls.NoClientCert
@@ -254,7 +258,7 @@ func NewFromConfig(conf Config) (ret Server, err error) {
 				ok := clientCAs.AppendCertsFromPEM([]byte(conf.TLSAuthorityCertificate))
 				if !ok {
 					err = errors.New("tls_authority_certificate: Could not load any certificates")
-					return
+					log.WithError(err).Panic("Improper TLS configuration")
 				}
 			}
 
@@ -283,7 +287,7 @@ func NewFromConfig(conf Config) (ret Server, err error) {
 			err = errors.New("resolved nil UDP address")
 		}
 		if err != nil {
-			return
+			log.WithError(err).Panic("Error configuring Datadog tracing")
 		}
 		trace.Enable()
 
@@ -463,7 +467,7 @@ func (s *Server) Start() {
 		var err error
 		s.tcpListener, err = net.ListenTCP("tcp", s.TCPAddr)
 		if err != nil {
-			logrus.WithError(err).Fatal("Error listening for TCP connections")
+			logrus.WithError(err).Panic("Error listening for TCP connections")
 		}
 
 		mode := "unencrypted"
