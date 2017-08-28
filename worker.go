@@ -11,6 +11,12 @@ import (
 	"github.com/stripe/veneur/ssf"
 )
 
+const counterTypeName = "counter"
+const gaugeTypeName = "gauge"
+const histogramTypeName = "histogram"
+const setTypeName = "set"
+const timerTypeName = "timer"
+
 // Worker is the doodad that does work.
 type Worker struct {
 	id         int
@@ -22,7 +28,7 @@ type Worker struct {
 	mutex      *sync.Mutex
 	stats      *statsd.Client
 	logger     *logrus.Logger
-	wm         WorkerMetrics
+	wm         *WorkerMetrics
 }
 
 // WorkerMetrics is just a plain struct bundling together the flushed contents of a worker
@@ -46,8 +52,8 @@ type WorkerMetrics struct {
 }
 
 // NewWorkerMetrics initializes a WorkerMetrics struct
-func NewWorkerMetrics() WorkerMetrics {
-	return WorkerMetrics{
+func NewWorkerMetrics() *WorkerMetrics {
+	return &WorkerMetrics{
 		counters:        make(map[samplers.MetricKey]*samplers.Counter),
 		globalCounters:  make(map[samplers.MetricKey]*samplers.Counter),
 		gauges:          make(map[samplers.MetricKey]*samplers.Gauge),
@@ -63,10 +69,10 @@ func NewWorkerMetrics() WorkerMetrics {
 // Upsert creates an entry on the WorkerMetrics struct for the given metrickey (if one does not already exist)
 // and updates the existing entry (if one already exists).
 // Returns true if the metric entry was created and false otherwise.
-func (wm WorkerMetrics) Upsert(mk samplers.MetricKey, Scope samplers.MetricScope, tags []string) bool {
+func (wm *WorkerMetrics) Upsert(mk samplers.MetricKey, Scope samplers.MetricScope, tags []string) bool {
 	present := false
 	switch mk.Type {
-	case "counter":
+	case counterTypeName:
 		if Scope == samplers.GlobalOnly {
 			if _, present = wm.globalCounters[mk]; !present {
 				wm.globalCounters[mk] = samplers.NewCounter(mk.Name, tags)
@@ -76,11 +82,11 @@ func (wm WorkerMetrics) Upsert(mk samplers.MetricKey, Scope samplers.MetricScope
 				wm.counters[mk] = samplers.NewCounter(mk.Name, tags)
 			}
 		}
-	case "gauge":
+	case gaugeTypeName:
 		if _, present = wm.gauges[mk]; !present {
 			wm.gauges[mk] = samplers.NewGauge(mk.Name, tags)
 		}
-	case "histogram":
+	case histogramTypeName:
 		if Scope == samplers.LocalOnly {
 			if _, present = wm.localHistograms[mk]; !present {
 				wm.localHistograms[mk] = samplers.NewHist(mk.Name, tags)
@@ -90,7 +96,7 @@ func (wm WorkerMetrics) Upsert(mk samplers.MetricKey, Scope samplers.MetricScope
 				wm.histograms[mk] = samplers.NewHist(mk.Name, tags)
 			}
 		}
-	case "set":
+	case setTypeName:
 		if Scope == samplers.LocalOnly {
 			if _, present = wm.localSets[mk]; !present {
 				wm.localSets[mk] = samplers.NewSet(mk.Name, tags)
@@ -100,7 +106,7 @@ func (wm WorkerMetrics) Upsert(mk samplers.MetricKey, Scope samplers.MetricScope
 				wm.sets[mk] = samplers.NewSet(mk.Name, tags)
 			}
 		}
-	case "timer":
+	case timerTypeName:
 		if Scope == samplers.LocalOnly {
 			if _, present = wm.localTimers[mk]; !present {
 				wm.localTimers[mk] = samplers.NewHist(mk.Name, tags)
@@ -171,27 +177,27 @@ func (w *Worker) ProcessMetric(m *samplers.UDPMetric) {
 	w.wm.Upsert(m.MetricKey, m.Scope, m.Tags)
 
 	switch m.Type {
-	case "counter":
+	case counterTypeName:
 		if m.Scope == samplers.GlobalOnly {
 			w.wm.globalCounters[m.MetricKey].Sample(m.Value.(float64), m.SampleRate)
 		} else {
 			w.wm.counters[m.MetricKey].Sample(m.Value.(float64), m.SampleRate)
 		}
-	case "gauge":
+	case gaugeTypeName:
 		w.wm.gauges[m.MetricKey].Sample(m.Value.(float64), m.SampleRate)
-	case "histogram":
+	case histogramTypeName:
 		if m.Scope == samplers.LocalOnly {
 			w.wm.localHistograms[m.MetricKey].Sample(m.Value.(float64), m.SampleRate)
 		} else {
 			w.wm.histograms[m.MetricKey].Sample(m.Value.(float64), m.SampleRate)
 		}
-	case "set":
+	case setTypeName:
 		if m.Scope == samplers.LocalOnly {
 			w.wm.localSets[m.MetricKey].Sample(m.Value.(string), m.SampleRate)
 		} else {
 			w.wm.sets[m.MetricKey].Sample(m.Value.(string), m.SampleRate)
 		}
-	case "timer":
+	case timerTypeName:
 		if m.Scope == samplers.LocalOnly {
 			w.wm.localTimers[m.MetricKey].Sample(m.Value.(float64), m.SampleRate)
 		} else {
@@ -210,7 +216,7 @@ func (w *Worker) ImportMetric(other samplers.JSONMetric) {
 	// we don't increment the processed metric counter here, it was already
 	// counted by the original veneur that sent this to us
 	w.imported++
-	if other.Type == "counter" {
+	if other.Type == counterTypeName {
 		// this is an odd special case -- counters that are imported are global
 		w.wm.Upsert(other.MetricKey, samplers.GlobalOnly, other.Tags)
 	} else {
@@ -218,19 +224,19 @@ func (w *Worker) ImportMetric(other samplers.JSONMetric) {
 	}
 
 	switch other.Type {
-	case "counter":
+	case counterTypeName:
 		if err := w.wm.globalCounters[other.MetricKey].Combine(other.Value); err != nil {
 			log.WithError(err).Error("Could not merge counters")
 		}
-	case "set":
+	case setTypeName:
 		if err := w.wm.sets[other.MetricKey].Combine(other.Value); err != nil {
 			log.WithError(err).Error("Could not merge sets")
 		}
-	case "histogram":
+	case histogramTypeName:
 		if err := w.wm.histograms[other.MetricKey].Combine(other.Value); err != nil {
 			log.WithError(err).Error("Could not merge histograms")
 		}
-	case "timer":
+	case timerTypeName:
 		if err := w.wm.timers[other.MetricKey].Combine(other.Value); err != nil {
 			log.WithError(err).Error("Could not merge timers")
 		}
@@ -240,7 +246,7 @@ func (w *Worker) ImportMetric(other samplers.JSONMetric) {
 }
 
 // Flush resets the worker's internal metrics and returns their contents.
-func (w *Worker) Flush() WorkerMetrics {
+func (w *Worker) Flush() *WorkerMetrics {
 	start := time.Now()
 	// This is a critical spot. The worker can't process metrics while this
 	// mutex is held! So we try and minimize it by copying the maps of values
