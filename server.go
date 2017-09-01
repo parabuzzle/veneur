@@ -31,6 +31,7 @@ import (
 	"github.com/stripe/veneur/plugins"
 	"github.com/stripe/veneur/plugins/influxdb"
 	localfilep "github.com/stripe/veneur/plugins/localfile"
+	"github.com/stripe/veneur/plugins/prometheus"
 	s3p "github.com/stripe/veneur/plugins/s3"
 	"github.com/stripe/veneur/samplers"
 	"github.com/stripe/veneur/trace"
@@ -361,6 +362,9 @@ func NewFromConfig(conf Config) (ret Server, err error) {
 		)
 		ret.registerPlugin(plugin)
 	}
+
+	plugin2 := prometheus.NewPrometheusPlugin(log, conf.InfluxAddress, conf.InfluxConsistency, conf.InfluxDBName, ret.HTTPClient, ret.Statsd)
+	ret.registerPlugin(plugin2)
 
 	if conf.FlushFile != "" {
 		localFilePlugin := &localfilep.Plugin{

@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stripe/veneur/samplers"
 	"github.com/stripe/veneur/trace"
 
@@ -40,6 +41,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle(pat.Get("/debug/pprof/trace"), http.HandlerFunc(pprof.Trace))
 	// TODO match without trailing slash as well
 	mux.Handle(pat.Get("/debug/pprof/*"), http.HandlerFunc(pprof.Index))
+
+	mux.Handle(pat.Get("/metrics"), prometheus.Handler())
 
 	return mux
 }
