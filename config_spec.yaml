@@ -152,6 +152,10 @@ datadog_api_key: "farts"
 # Hostname to send Datadog trace data to.
 datadog_trace_api_address: "http://localhost:7777"
 
+# == SignalFX ==
+# SignalFX can be a sink for metrics.
+signalfx_api_key: "abc123"
+
 # == InfluxDB ==
 # InfluxDB can be a sink for metrics.
 

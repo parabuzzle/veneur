@@ -10,6 +10,8 @@ import (
 
 	"github.com/DataDog/datadog-go/statsd"
 	"github.com/Sirupsen/logrus"
+	"github.com/signalfx/golib/datapoint"
+	"github.com/signalfx/golib/sfxclient"
 	"github.com/stripe/veneur/samplers"
 	"github.com/stripe/veneur/trace"
 )
@@ -207,4 +209,49 @@ func (dd *datadogMetricSink) flushPart(ctx context.Context, metricSlice []DDMetr
 	postHelper(ctx, dd.HTTPClient, dd.statsd, fmt.Sprintf("%s/api/v1/series?api_key=%s", dd.ddHostname, dd.apiKey), map[string][]DDMetric{
 		"series": metricSlice,
 	}, "flush", true)
+}
+
+type signalFXSink struct {
+	client   *sfxclient.HTTPSink
+	Hostname string
+	statsd   *statsd.Client
+}
+
+// NewSignalFXSink creates a new Datadog sink for trace spans.
+func NewSignalFXSink(config *Config, interval float64, httpClient *http.Client, stats *statsd.Client) (*signalFXSink, error) {
+	client := sfxclient.NewHTTPSink()
+	client.AuthToken = config.SignalfxAPIKey
+
+	return &signalFXSink{
+		client:   client,
+		Hostname: "https://ingest.signalfx.com",
+		statsd:   stats,
+	}, nil
+}
+
+// Name returns the name of this sink.
+func (sfx *signalFXSink) Name() string {
+	return "signalfx"
+}
+
+func (sfx *signalFXSink) Flush(ctx context.Context, interMetrics []samplers.InterMetric) error {
+	span, _ := trace.StartSpanFromContext(ctx, "")
+	defer span.Finish()
+
+	points := []*datapoint.Datapoint{}
+	for _, metric := range interMetrics {
+		dims := map[string]string{}
+		for _, tag := range metric.Tags {
+			kv := strings.Split(tag, ":")
+			dims[kv[0]] = kv[1]
+		}
+		if metric.Type == samplers.GaugeMetric {
+			points = append(points, sfxclient.GaugeF(metric.Name, dims, metric.Value))
+		} else if metric.Type == samplers.CounterMetric {
+			points = append(points, sfxclient.Counter(metric.Name, dims, int64(metric.Value)))
+		}
+	}
+	err := sfx.client.AddDatapoints(context.Background(), points)
+
+	return err
 }
