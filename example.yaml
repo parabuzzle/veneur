@@ -102,6 +102,9 @@ tls_authority_certificate: ""
 
 # == SINKS ==
 
+# == SignalFX ==
+signalfx_api_key: ""
+
 # == Datadog ==
 # Datadog can be a sink for metrics, events, service checks and trace spans.
 

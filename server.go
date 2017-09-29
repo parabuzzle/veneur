@@ -267,11 +267,21 @@ func NewFromConfig(conf Config) (ret Server, err error) {
 	conf.TLSKey = REDACTED
 	log.WithField("config", conf).Debug("Initialized server")
 
-	ddSink, err := NewDatadogMetricSink(&conf, ret.interval.Seconds(), ret.HTTPClient, ret.Statsd)
-	if err != nil {
-		return
+	if conf.DatadogAPIHostname != "" {
+		ddSink, err := NewDatadogMetricSink(&conf, ret.interval.Seconds(), ret.HTTPClient, ret.Statsd)
+		if err != nil {
+			return ret, err
+		}
+		ret.metricSinks = append(ret.metricSinks, ddSink)
 	}
-	ret.metricSinks = append(ret.metricSinks, ddSink)
+
+	if conf.SignalfxAPIKey != "" {
+		sfxSink, err := NewSignalFXSink(&conf, ret.Statsd)
+		if err != nil {
+			return ret, err
+		}
+		ret.metricSinks = append(ret.metricSinks, sfxSink)
+	}
 
 	// Configure tracing sinks
 	if len(conf.SsfListenAddresses) > 0 && (conf.DatadogTraceAPIAddress != "" || conf.TraceLightstepAccessToken != "") {

@@ -218,7 +218,8 @@ type signalFXSink struct {
 }
 
 // NewSignalFXSink creates a new Datadog sink for trace spans.
-func NewSignalFXSink(config *Config, interval float64, httpClient *http.Client, stats *statsd.Client) (*signalFXSink, error) {
+// TODO Send PR for SFX client to take an HTTPClient?
+func NewSignalFXSink(config *Config, stats *statsd.Client) (*signalFXSink, error) {
 	client := sfxclient.NewHTTPSink()
 	client.AuthToken = config.SignalfxAPIKey
 
@@ -238,6 +239,7 @@ func (sfx *signalFXSink) Flush(ctx context.Context, interMetrics []samplers.Inte
 	span, _ := trace.StartSpanFromContext(ctx, "")
 	defer span.Finish()
 
+	flushStart := time.Now()
 	points := []*datapoint.Datapoint{}
 	for _, metric := range interMetrics {
 		dims := map[string]string{}
@@ -252,6 +254,13 @@ func (sfx *signalFXSink) Flush(ctx context.Context, interMetrics []samplers.Inte
 		}
 	}
 	err := sfx.client.AddDatapoints(context.Background(), points)
+	sfx.statsd.TimeInMilliseconds("flush.total_duration_ns", float64(time.Since(flushStart).Nanoseconds()), []string{"plugin:signalfx"}, 1.0)
+	// TODO Fix these metrics to be per-metric sink
+	log.WithField("metrics", len(interMetrics)).Info("Completed flush to SignalFX")
 
 	return err
+}
+
+func (sfx *signalFXSink) FlushEventsChecks(ctx context.Context, events []samplers.UDPEvent, checks []samplers.UDPServiceCheck) {
+	// TODO
 }
