@@ -3,6 +3,7 @@ package veneur
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -35,6 +36,7 @@ import (
 	s3p "github.com/stripe/veneur/plugins/s3"
 	"github.com/stripe/veneur/protocol"
 	"github.com/stripe/veneur/samplers"
+	"github.com/stripe/veneur/ssf"
 	"github.com/stripe/veneur/trace"
 )
 
@@ -110,6 +112,8 @@ type Server struct {
 	spanSinks []spanSink
 
 	traceLightstepAccessToken string
+
+	TraceClient *trace.Client
 }
 
 // NewFromConfig creates a new veneur server from a configuration specification.
@@ -391,6 +395,13 @@ func (s *Server) Start() {
 	}()
 
 	if s.TracingEnabled() {
+		tb := &internalTraceBackend{server: s}
+		cl, err := trace.NewBackendClient(tb, trace.Capacity(200))
+		if err != nil {
+			panic(fmt.Sprintf("Could not set up internal trace backend: %v", err))
+		}
+		s.TraceClient = cl
+
 		log.Info("Starting Trace worker")
 		go func() {
 			defer func() {
@@ -857,3 +868,34 @@ func (s *Server) TracingEnabled() bool {
 func (s *Server) tracingSinkEnabled() bool {
 	return s.DDTraceAddress != "" || s.traceLightstepAccessToken != ""
 }
+
+type internalTraceBackend struct {
+	server *Server
+}
+
+// Close is a no-op on the internal backend.
+func (tb *internalTraceBackend) Close() error {
+	return nil
+}
+
+// SendSync sends the span directly into the veneur Server.
+func (tb *internalTraceBackend) SendSync(ctx context.Context, span *ssf.SSFSpan) error {
+	ch := make(chan struct{})
+	go func() {
+		tb.server.SpanWorker.SpanChan <- *span
+		close(ch)
+	}()
+	select {
+	case <-ch:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// Flush on an internal trace backend is a no-op.
+func (tb *internalTraceBackend) FlushSync(ctx context.Context) error {
+	return nil
+}
+
+var _ trace.ClientBackend = &internalTraceBackend{}
